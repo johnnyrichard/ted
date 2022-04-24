@@ -1,0 +1,9 @@
+Terminal Text Editor
+====================
+
+Super lightweight terminal text editor. 
+
+RUN
+
+    $ make
+    $ ./ted
