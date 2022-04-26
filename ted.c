@@ -21,13 +21,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
+#include "string_builder.h"
+
 #define CTRL_KEY(k) ((k) & 0x1F)
+#define TED_VERSION "0.0.1"
 
 typedef struct editor_config {
+  int cx, cy;
   int screen_rows;
   int screen_cols;
   struct termios orig_termios;
@@ -40,8 +45,9 @@ void editor_init(editor_config_t *ec);
 char editor_read_key();
 int get_cursor_position(int *rows, int *cols);
 int get_window_size(int *rows, int *cols);
-void editor_process_key();
-void editor_draw_rows(editor_config_t *ec);
+void editor_move_cursor(editor_config_t *ec, char key);
+void editor_process_key(editor_config_t *ec);
+void editor_draw_rows(editor_config_t *ec, string_builder_t *sb);
 void editor_clear_screen();
 void editor_refresh_screen(editor_config_t *ec);
 void disable_raw_mode();
@@ -57,7 +63,7 @@ main()
 
   while (true) {
     editor_refresh_screen(&E);
-    editor_process_key();
+    editor_process_key(&E);
   }
 
   return EXIT_SUCCESS;
@@ -66,7 +72,9 @@ main()
 void
 editor_init(editor_config_t *ec)
 {
-  if (get_window_size(&ec->screen_rows, &ec->screen_rows) == -1) {
+  ec->cx = 0;
+  ec->cy = 0;
+  if (get_window_size(&ec->screen_rows, &ec->screen_cols) == -1) {
     die("get_window_size");
   }
 }
@@ -133,7 +141,26 @@ get_window_size(int *rows, int *cols)
 }
 
 void
-editor_process_key()
+editor_move_cursor(editor_config_t *ec, char key)
+{
+  switch (key) {
+    case 'h':
+      ec->cx--;
+      break;
+    case 'l':
+      ec->cx++;
+      break;
+    case 'k':
+      ec->cy--;
+      break;
+    case 'j':
+      ec->cy++;
+      break;
+  }
+}
+
+void
+editor_process_key(editor_config_t *ec)
 {
   char c = editor_read_key();
 
@@ -141,6 +168,12 @@ editor_process_key()
     case CTRL_KEY('q'):
       editor_clear_screen();
       exit(EXIT_SUCCESS);
+      break;
+    case 'h':
+    case 'j':
+    case 'k':
+    case 'l':
+      editor_move_cursor(ec, c);
       break;
   }
 }
@@ -153,13 +186,34 @@ editor_clear_screen()
 }
 
 void
-editor_draw_rows(editor_config_t *ec)
+editor_draw_rows(editor_config_t *ec, string_builder_t *sb)
 {
   for (int y = 0; y < ec->screen_rows; ++y) {
-    write(STDOUT_FILENO, "~", 1);
+    if (y == ec->screen_rows / 3) {
+      char welcome[80];
+      int welcomelen = snprintf(welcome, sizeof(welcome), "Ted editor --- version %s", TED_VERSION);
+      if (welcomelen > ec->screen_cols) {
+        welcomelen = ec->screen_cols;
+      }
 
+      int padding = (ec->screen_cols - welcomelen) / 2;
+      if (padding) {
+        string_builder_append(sb, "~", 1);
+        padding--;
+      }
+
+      while (padding--) {
+        string_builder_append(sb, " ", 1);
+      }
+
+      string_builder_append(sb, welcome, welcomelen);
+    } else {
+      string_builder_append(sb, "~", 1);
+    }
+
+    string_builder_append(sb, "\x1b[K", 3);
     if (y < ec->screen_rows - 1) {
-      write(STDOUT_FILENO, "\r\n", 2);
+      string_builder_append(sb, "\r\n", 2);
     }
   }
 }
@@ -167,9 +221,21 @@ editor_draw_rows(editor_config_t *ec)
 void
 editor_refresh_screen(editor_config_t *ec)
 {
-  editor_clear_screen();
-  editor_draw_rows(ec);
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  string_builder_t sb = STRING_BUILDER_INIT;
+
+  string_builder_append(&sb, "\x1b[?25l", 6);
+  string_builder_append(&sb, "\x1b[H", 3);
+
+  editor_draw_rows(ec, &sb);
+
+  char buf[32];
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", ec->cy + 1, ec->cx + 1);
+  string_builder_append(&sb, buf, strlen(buf));
+
+  string_builder_append(&sb, "\x1b[?25h", 6);
+
+  write(STDOUT_FILENO, sb.data, sb.len);
+  string_builder_destroy(&sb);
 }
 
 void

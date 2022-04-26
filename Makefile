@@ -1,2 +1,2 @@
-ted: ted.c
-		$(CC) ted.c -o ted -Wall -Wextra -pedantic -std=c11
+ted: ted.c string_builder.o
+		$(CC) ted.c string_builder.o -o ted -ggdb -Wall -Wextra -pedantic -std=c11
