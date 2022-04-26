@@ -31,6 +31,13 @@
 #define CTRL_KEY(k) ((k) & 0x1F)
 #define TED_VERSION "0.0.1"
 
+enum editor_key {
+  ARROW_LEFT  = 1000,
+  ARROW_RIGHT,
+  ARROW_UP,
+  ARROW_DOWN
+};
+
 typedef struct editor_config {
   int cx, cy;
   int screen_rows;
@@ -42,10 +49,10 @@ editor_config_t E;
 
 
 void editor_init(editor_config_t *ec);
-char editor_read_key();
+int editor_read_key();
 int get_cursor_position(int *rows, int *cols);
 int get_window_size(int *rows, int *cols);
-void editor_move_cursor(editor_config_t *ec, char key);
+void editor_move_cursor(editor_config_t *ec, int key);
 void editor_process_key(editor_config_t *ec);
 void editor_draw_rows(editor_config_t *ec, string_builder_t *sb);
 void editor_clear_screen();
@@ -79,7 +86,7 @@ editor_init(editor_config_t *ec)
   }
 }
 
-char
+int
 editor_read_key()
 {
   int nread;
@@ -89,7 +96,30 @@ editor_read_key()
       die("read");
     }
   }
-  return c;
+
+  if (c == '\x1b') {
+    char seq[3];
+
+    if (read(STDIN_FILENO, &seq[0], 1) != 1) {
+      return '\x1b';
+    }
+
+    if (read(STDIN_FILENO, &seq[1], 1) != 1) {
+      return '\x1b';
+    }
+
+    if (seq[0] == '[') {
+      switch (seq[1]) {
+        case 'A': return ARROW_UP;
+        case 'B': return ARROW_DOWN;
+        case 'C': return ARROW_RIGHT;
+        case 'D': return ARROW_LEFT;
+      }
+    }
+    return '\x1b';
+  } else {
+    return c;
+  }
 }
 
 int
@@ -141,20 +171,28 @@ get_window_size(int *rows, int *cols)
 }
 
 void
-editor_move_cursor(editor_config_t *ec, char key)
+editor_move_cursor(editor_config_t *ec, int key)
 {
   switch (key) {
-    case 'h':
-      ec->cx--;
+    case ARROW_LEFT:
+      if (ec->cx != 0) {
+        ec->cx--;
+      }
       break;
-    case 'l':
-      ec->cx++;
+    case ARROW_RIGHT:
+      if (ec->cx != ec->screen_cols - 1) {
+        ec->cx++;
+      }
       break;
-    case 'k':
-      ec->cy--;
+    case ARROW_UP:
+      if (ec->cy != 0) {
+        ec->cy--;
+      }
       break;
-    case 'j':
-      ec->cy++;
+    case ARROW_DOWN:
+      if (ec->cy != ec->screen_rows - 1) {
+        ec->cy++;
+      }
       break;
   }
 }
@@ -162,17 +200,17 @@ editor_move_cursor(editor_config_t *ec, char key)
 void
 editor_process_key(editor_config_t *ec)
 {
-  char c = editor_read_key();
+  int c = editor_read_key();
 
   switch (c) {
     case CTRL_KEY('q'):
       editor_clear_screen();
       exit(EXIT_SUCCESS);
       break;
-    case 'h':
-    case 'j':
-    case 'k':
-    case 'l':
+    case ARROW_UP:
+    case ARROW_DOWN:
+    case ARROW_LEFT:
+    case ARROW_RIGHT:
       editor_move_cursor(ec, c);
       break;
   }
