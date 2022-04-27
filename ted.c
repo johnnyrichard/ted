@@ -15,6 +15,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -23,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -43,20 +48,28 @@ enum editor_key {
   PAGE_DOWN
 };
 
+typedef struct erow {
+  int size;
+  char *chars;
+} erow_t;
+
 typedef struct editor_config {
   int cx, cy;
   int screen_rows;
   int screen_cols;
+  int num_rows;
+  erow_t row;
   struct termios orig_termios;
 } editor_config_t;
 
 editor_config_t E;
 
 
-void editor_init(editor_config_t *ec);
-int editor_read_key();
 int get_cursor_position(int *rows, int *cols);
 int get_window_size(int *rows, int *cols);
+void editor_init(editor_config_t *ec);
+void editor_open(editor_config_t *ec, char *filename);
+int editor_read_key();
 void editor_move_cursor(editor_config_t *ec, int key);
 void editor_process_key(editor_config_t *ec);
 void editor_draw_rows(editor_config_t *ec, string_builder_t *sb);
@@ -67,11 +80,14 @@ void enable_raw_mode();
 void die(const char *s);
 
 int
-main()
+main(int argc, char *argv[])
 {
   enable_raw_mode();
 
   editor_init(&E);
+  if (argc >= 2) {
+    editor_open(&E, argv[1]);
+  }
 
   while (true) {
     editor_refresh_screen(&E);
@@ -86,9 +102,33 @@ editor_init(editor_config_t *ec)
 {
   ec->cx = 0;
   ec->cy = 0;
+  ec->num_rows = 0;
   if (get_window_size(&ec->screen_rows, &ec->screen_cols) == -1) {
     die("get_window_size");
   }
+}
+
+void
+editor_open(editor_config_t *ec, char *filename)
+{
+  FILE *fp = fopen(filename, "r");
+  if (!fp) die("fopen");
+
+  char* line = NULL;
+  size_t linecap = 0;
+  ssize_t linelen = getline(&line, &linecap, fp);
+  if (linelen != -1) {
+    while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r')) {
+      linelen--;
+    }
+    ec->row.size = linelen;
+    ec->row.chars = malloc(linelen + 1);
+    memcpy(ec->row.chars, line, linelen);
+    ec->row.chars[linelen] = '\0';
+    ec->num_rows = 1;
+  }
+  free(line);
+  fclose(fp);
 }
 
 int
@@ -263,26 +303,32 @@ void
 editor_draw_rows(editor_config_t *ec, string_builder_t *sb)
 {
   for (int y = 0; y < ec->screen_rows; ++y) {
-    if (y == ec->screen_rows / 3) {
-      char welcome[80];
-      int welcomelen = snprintf(welcome, sizeof(welcome), "Ted editor --- version %s", TED_VERSION);
-      if (welcomelen > ec->screen_cols) {
-        welcomelen = ec->screen_cols;
-      }
+    if (y >= ec->num_rows) {
+      if (ec->num_rows == 0 && y == ec->screen_rows / 3) {
+        char welcome[80];
+        int welcomelen = snprintf(welcome, sizeof(welcome), "Ted editor --- version %s", TED_VERSION);
+        if (welcomelen > ec->screen_cols) {
+          welcomelen = ec->screen_cols;
+        }
 
-      int padding = (ec->screen_cols - welcomelen) / 2;
-      if (padding) {
+        int padding = (ec->screen_cols - welcomelen) / 2;
+        if (padding) {
+          string_builder_append(sb, "~", 1);
+          padding--;
+        }
+
+        while (padding--) {
+          string_builder_append(sb, " ", 1);
+        }
+
+        string_builder_append(sb, welcome, welcomelen);
+      } else {
         string_builder_append(sb, "~", 1);
-        padding--;
       }
-
-      while (padding--) {
-        string_builder_append(sb, " ", 1);
-      }
-
-      string_builder_append(sb, welcome, welcomelen);
     } else {
-      string_builder_append(sb, "~", 1);
+      int len = ec->row.size;
+      if (len > ec->screen_cols) len = ec->screen_cols;
+      string_builder_append(sb, ec->row.chars, len);
     }
 
     string_builder_append(sb, "\x1b[K", 3);
