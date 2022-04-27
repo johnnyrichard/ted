@@ -53,28 +53,28 @@ typedef struct erow {
   char *chars;
 } erow_t;
 
-typedef struct editor_config {
+typedef struct editor {
   int cx, cy;
   int screen_rows;
   int screen_cols;
   int num_rows;
   erow_t row;
   struct termios orig_termios;
-} editor_config_t;
+} editor_t;
 
-editor_config_t E;
+editor_t E;
 
 
 int get_cursor_position(int *rows, int *cols);
 int get_window_size(int *rows, int *cols);
-void editor_init(editor_config_t *ec);
-void editor_open(editor_config_t *ec, char *filename);
+void editor_init(editor_t *e);
+void editor_open(editor_t *e, char *filename);
 int editor_read_key();
-void editor_move_cursor(editor_config_t *ec, int key);
-void editor_process_key(editor_config_t *ec);
-void editor_draw_rows(editor_config_t *ec, string_builder_t *sb);
+void editor_move_cursor(editor_t *e, int key);
+void editor_process_key(editor_t *e);
+void editor_draw_rows(editor_t *e, string_builder_t *sb);
 void editor_clear_screen();
-void editor_refresh_screen(editor_config_t *ec);
+void editor_refresh_screen(editor_t *e);
 void disable_raw_mode();
 void enable_raw_mode();
 void die(const char *s);
@@ -98,34 +98,34 @@ main(int argc, char *argv[])
 }
 
 void
-editor_init(editor_config_t *ec)
+editor_init(editor_t *e)
 {
-  ec->cx = 0;
-  ec->cy = 0;
-  ec->num_rows = 0;
-  if (get_window_size(&ec->screen_rows, &ec->screen_cols) == -1) {
+  e->cx = 0;
+  e->cy = 0;
+  e->num_rows = 0;
+  if (get_window_size(&e->screen_rows, &e->screen_cols) == -1) {
     die("get_window_size");
   }
 }
 
 void
-editor_open(editor_config_t *ec, char *filename)
+editor_open(editor_t *e, char *filename)
 {
   FILE *fp = fopen(filename, "r");
   if (!fp) die("fopen");
 
   char* line = NULL;
-  size_t linecap = 0;
-  ssize_t linelen = getline(&line, &linecap, fp);
+  size_t lineap = 0;
+  ssize_t linelen = getline(&line, &lineap, fp);
   if (linelen != -1) {
     while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r')) {
       linelen--;
     }
-    ec->row.size = linelen;
-    ec->row.chars = malloc(linelen + 1);
-    memcpy(ec->row.chars, line, linelen);
-    ec->row.chars[linelen] = '\0';
-    ec->num_rows = 1;
+    e->row.size = linelen;
+    e->row.chars = malloc(linelen + 1);
+    memcpy(e->row.chars, line, linelen);
+    e->row.chars[linelen] = '\0';
+    e->num_rows = 1;
   }
   free(line);
   fclose(fp);
@@ -232,34 +232,34 @@ get_window_size(int *rows, int *cols)
 }
 
 void
-editor_move_cursor(editor_config_t *ec, int key)
+editor_move_cursor(editor_t *e, int key)
 {
   switch (key) {
     case ARROW_LEFT:
-      if (ec->cx != 0) {
-        ec->cx--;
+      if (e->cx != 0) {
+        e->cx--;
       }
       break;
     case ARROW_RIGHT:
-      if (ec->cx != ec->screen_cols - 1) {
-        ec->cx++;
+      if (e->cx != e->screen_cols - 1) {
+        e->cx++;
       }
       break;
     case ARROW_UP:
-      if (ec->cy != 0) {
-        ec->cy--;
+      if (e->cy != 0) {
+        e->cy--;
       }
       break;
     case ARROW_DOWN:
-      if (ec->cy != ec->screen_rows - 1) {
-        ec->cy++;
+      if (e->cy != e->screen_rows - 1) {
+        e->cy++;
       }
       break;
   }
 }
 
 void
-editor_process_key(editor_config_t *ec)
+editor_process_key(editor_t *e)
 {
   int c = editor_read_key();
 
@@ -269,17 +269,17 @@ editor_process_key(editor_config_t *ec)
       exit(EXIT_SUCCESS);
       break;
     case HOME_KEY:
-      ec->cx = 0;
+      e->cx = 0;
       break;
     case END_KEY:
-      ec->cx = ec->screen_cols - 1;
+      e->cx = e->screen_cols - 1;
       break;
     case PAGE_UP:
     case PAGE_DOWN:
       {
-        int times = ec->screen_rows;
+        int times = e->screen_rows;
         while (times--) {
-          editor_move_cursor(ec, c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
+          editor_move_cursor(e, c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
         }
       }
       break;
@@ -287,7 +287,7 @@ editor_process_key(editor_config_t *ec)
     case ARROW_DOWN:
     case ARROW_LEFT:
     case ARROW_RIGHT:
-      editor_move_cursor(ec, c);
+      editor_move_cursor(e, c);
       break;
   }
 }
@@ -300,18 +300,18 @@ editor_clear_screen()
 }
 
 void
-editor_draw_rows(editor_config_t *ec, string_builder_t *sb)
+editor_draw_rows(editor_t *e, string_builder_t *sb)
 {
-  for (int y = 0; y < ec->screen_rows; ++y) {
-    if (y >= ec->num_rows) {
-      if (ec->num_rows == 0 && y == ec->screen_rows / 3) {
+  for (int y = 0; y < e->screen_rows; ++y) {
+    if (y >= e->num_rows) {
+      if (e->num_rows == 0 && y == e->screen_rows / 3) {
         char welcome[80];
         int welcomelen = snprintf(welcome, sizeof(welcome), "Ted editor --- version %s", TED_VERSION);
-        if (welcomelen > ec->screen_cols) {
-          welcomelen = ec->screen_cols;
+        if (welcomelen > e->screen_cols) {
+          welcomelen = e->screen_cols;
         }
 
-        int padding = (ec->screen_cols - welcomelen) / 2;
+        int padding = (e->screen_cols - welcomelen) / 2;
         if (padding) {
           string_builder_append(sb, "~", 1);
           padding--;
@@ -326,30 +326,30 @@ editor_draw_rows(editor_config_t *ec, string_builder_t *sb)
         string_builder_append(sb, "~", 1);
       }
     } else {
-      int len = ec->row.size;
-      if (len > ec->screen_cols) len = ec->screen_cols;
-      string_builder_append(sb, ec->row.chars, len);
+      int len = e->row.size;
+      if (len > e->screen_cols) len = e->screen_cols;
+      string_builder_append(sb, e->row.chars, len);
     }
 
     string_builder_append(sb, "\x1b[K", 3);
-    if (y < ec->screen_rows - 1) {
+    if (y < e->screen_rows - 1) {
       string_builder_append(sb, "\r\n", 2);
     }
   }
 }
 
 void
-editor_refresh_screen(editor_config_t *ec)
+editor_refresh_screen(editor_t *e)
 {
   string_builder_t sb = STRING_BUILDER_INIT;
 
   string_builder_append(&sb, "\x1b[?25l", 6);
   string_builder_append(&sb, "\x1b[H", 3);
 
-  editor_draw_rows(ec, &sb);
+  editor_draw_rows(e, &sb);
 
   char buf[32];
-  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", ec->cy + 1, ec->cx + 1);
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", e->cy + 1, e->cx + 1);
   string_builder_append(&sb, buf, strlen(buf));
 
   string_builder_append(&sb, "\x1b[?25h", 6);
