@@ -55,10 +55,11 @@ typedef struct erow {
 
 typedef struct editor {
   int cx, cy;
+  int rowoff;
   int screen_rows;
   int screen_cols;
   int num_rows;
-  erow_t row;
+  erow_t *row;
   struct termios orig_termios;
 } editor_t;
 
@@ -70,6 +71,8 @@ int get_window_size(int *rows, int *cols);
 void editor_init(editor_t *e);
 void editor_open(editor_t *e, char *filename);
 int editor_read_key();
+void editor_append_row(editor_t *e, char *s, size_t len);
+void editor_scroll(editor_t *e);
 void editor_move_cursor(editor_t *e, int key);
 void editor_process_key(editor_t *e);
 void editor_draw_rows(editor_t *e, string_builder_t *sb);
@@ -102,7 +105,9 @@ editor_init(editor_t *e)
 {
   e->cx = 0;
   e->cy = 0;
+  e->rowoff = 0;
   e->num_rows = 0;
+  e->row = NULL;
   if (get_window_size(&e->screen_rows, &e->screen_cols) == -1) {
     die("get_window_size");
   }
@@ -116,19 +121,39 @@ editor_open(editor_t *e, char *filename)
 
   char* line = NULL;
   size_t lineap = 0;
-  ssize_t linelen = getline(&line, &lineap, fp);
-  if (linelen != -1) {
+  ssize_t linelen;
+  while((linelen = getline(&line, &lineap, fp)) != -1) {
     while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r')) {
       linelen--;
     }
-    e->row.size = linelen;
-    e->row.chars = malloc(linelen + 1);
-    memcpy(e->row.chars, line, linelen);
-    e->row.chars[linelen] = '\0';
-    e->num_rows = 1;
+    editor_append_row(e, line, linelen);
   }
   free(line);
   fclose(fp);
+}
+
+void
+editor_append_row(editor_t *e, char *s, size_t len)
+{
+  e->row = realloc(e->row, sizeof(erow_t) * (e->num_rows + 1));
+
+  int at = e->num_rows;
+  e->row[at].size = len;
+  e->row[at].chars = malloc(len + 1);
+  memcpy(e->row[at].chars, s, len);
+  e->row[at].chars[len] = '\0';
+  e->num_rows++;
+}
+
+void
+editor_scroll(editor_t *e)
+{
+  if (e->cy < e->rowoff) {
+    e->rowoff = e->cy;
+  }
+  if (e->cy >= e->rowoff + e->screen_rows) {
+    e->rowoff = e->cy - e->screen_rows + 1;
+  }
 }
 
 int
@@ -251,7 +276,7 @@ editor_move_cursor(editor_t *e, int key)
       }
       break;
     case ARROW_DOWN:
-      if (e->cy != e->screen_rows - 1) {
+      if (e->cy < e->screen_rows) {
         e->cy++;
       }
       break;
@@ -303,7 +328,8 @@ void
 editor_draw_rows(editor_t *e, string_builder_t *sb)
 {
   for (int y = 0; y < e->screen_rows; ++y) {
-    if (y >= e->num_rows) {
+    int filerow = y + e->rowoff;
+    if (filerow >= e->num_rows) {
       if (e->num_rows == 0 && y == e->screen_rows / 3) {
         char welcome[80];
         int welcomelen = snprintf(welcome, sizeof(welcome), "Ted editor --- version %s", TED_VERSION);
@@ -326,9 +352,9 @@ editor_draw_rows(editor_t *e, string_builder_t *sb)
         string_builder_append(sb, "~", 1);
       }
     } else {
-      int len = e->row.size;
+      int len = e->row[filerow].size;
       if (len > e->screen_cols) len = e->screen_cols;
-      string_builder_append(sb, e->row.chars, len);
+      string_builder_append(sb, e->row[filerow].chars, len);
     }
 
     string_builder_append(sb, "\x1b[K", 3);
@@ -341,6 +367,7 @@ editor_draw_rows(editor_t *e, string_builder_t *sb)
 void
 editor_refresh_screen(editor_t *e)
 {
+  editor_scroll(e);
   string_builder_t sb = STRING_BUILDER_INIT;
 
   string_builder_append(&sb, "\x1b[?25l", 6);
@@ -349,7 +376,7 @@ editor_refresh_screen(editor_t *e)
   editor_draw_rows(e, &sb);
 
   char buf[32];
-  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", e->cy + 1, e->cx + 1);
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (e->cy - e->rowoff) + 1, e->cx + 1);
   string_builder_append(&sb, buf, strlen(buf));
 
   string_builder_append(&sb, "\x1b[?25h", 6);
