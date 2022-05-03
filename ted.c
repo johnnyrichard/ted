@@ -56,6 +56,7 @@ typedef struct erow {
 typedef struct editor {
   int cx, cy;
   int rowoff;
+  int coloff;
   int screen_rows;
   int screen_cols;
   int num_rows;
@@ -106,6 +107,7 @@ editor_init(editor_t *e)
   e->cx = 0;
   e->cy = 0;
   e->rowoff = 0;
+  e->coloff = 0;
   e->num_rows = 0;
   e->row = NULL;
   if (get_window_size(&e->screen_rows, &e->screen_cols) == -1) {
@@ -153,6 +155,12 @@ editor_scroll(editor_t *e)
   }
   if (e->cy >= e->rowoff + e->screen_rows) {
     e->rowoff = e->cy - e->screen_rows + 1;
+  }
+  if (e->cx < e->coloff) {
+    e->coloff = e->cx;
+  }
+  if (e->cx >= e->coloff + e->screen_cols) {
+      e->coloff = e->cx - e->screen_cols + 1;
   }
 }
 
@@ -266,9 +274,7 @@ editor_move_cursor(editor_t *e, int key)
       }
       break;
     case ARROW_RIGHT:
-      if (e->cx != e->screen_cols - 1) {
-        e->cx++;
-      }
+      e->cx++;
       break;
     case ARROW_UP:
       if (e->cy != 0) {
@@ -352,9 +358,10 @@ editor_draw_rows(editor_t *e, string_builder_t *sb)
         string_builder_append(sb, "~", 1);
       }
     } else {
-      int len = e->row[filerow].size;
+      int len = e->row[filerow].size - e->coloff;
+      if (len < 0) len = 0;
       if (len > e->screen_cols) len = e->screen_cols;
-      string_builder_append(sb, e->row[filerow].chars, len);
+      string_builder_append(sb, &e->row[filerow].chars[e->coloff], len);
     }
 
     string_builder_append(sb, "\x1b[K", 3);
@@ -376,7 +383,8 @@ editor_refresh_screen(editor_t *e)
   editor_draw_rows(e, &sb);
 
   char buf[32];
-  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (e->cy - e->rowoff) + 1, e->cx + 1);
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (e->cy - e->rowoff) + 1, 
+                                            (e->cx + e->coloff) + 1);
   string_builder_append(&sb, buf, strlen(buf));
 
   string_builder_append(&sb, "\x1b[?25h", 6);
